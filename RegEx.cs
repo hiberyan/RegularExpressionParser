@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -49,14 +50,45 @@ namespace RegularExpression
         private int _nextStateId;
         private Stack<FiniteStateAutomaton> _operandStack;
         private HashSet<char> _inputSet;
-        public RegEx()
+
+        private List<string> _matchedPatterns = new List<string>();
+        private List<int> _matchedPatternPositions = new List<int>();
+        private string _pattern;
+        private List<PatternState> _patternList = new List<PatternState>();
+        private int _patternIndex = 0;
+
+        private FiniteStateAutomaton _NFA;
+        private FiniteStateAutomaton _DFA;
+
+        public RegEx(string pattern)
         {
             _nextStateId = 0;
             _operandStack = new Stack<FiniteStateAutomaton>();
             _inputSet = new HashSet<char>();
+
+            CreateNFA(pattern);
+            ConvertNFAToDFA();
         }
 
-        public void CreateNFA(string input)
+        public Match Match(string pattern)
+        {
+            _patternList.Clear();
+            _pattern = pattern;
+            if (Find())
+            {
+                return new Match(this, _matchedPatternPositions[0], _matchedPatterns[0], true, 1);
+
+            }
+            return new Match(null, -1, null, false, -1);
+        }
+
+        public bool IsMatch(string pattern)
+        {
+             _patternList.Clear();
+            _pattern = pattern;
+            return Find();
+        }
+        private void CreateNFA(string input)
         {
             Stack<char> operatorStack = new Stack<char>();
             var expandedInput = ConcatExpand(input);
@@ -120,9 +152,23 @@ namespace RegularExpression
                 return;
             var A = _operandStack.Pop();
             A.GetLastState().AcceptState = true;
+
+#if DEBUG
+            if (A.GetFirstState() != null)
+            {
+                using (var stream = File.OpenWrite("NFA.txt"))
+                {
+                    using (var sw = new StreamWriter(stream))
+                    {
+                        HashSet<State> states = new HashSet<State>();
+                    }
+                }
+            }
+            
+#endif
             _NFA = A;
         }
-        private FiniteStateAutomaton _NFA;
+
         //Kleens Closure ->Highest
         //Concatenation ->Middle
         //Union        -> lowest
@@ -144,21 +190,7 @@ namespace RegularExpression
 
         }
 
-        private void Push(Char input)
-        {
-            var state0 = new State(++_nextStateId);
-            var state1 = new State(++_nextStateId);
-            state0.AddTransition(input, state1);
-
-            FiniteStateAutomaton fsa = new FiniteStateAutomaton();
-            fsa.PushBack(state0);
-            fsa.PushBack(state1);
-
-            _operandStack.Push(fsa);
-
-            _inputSet.Add(input);
-        }
-
+     
         //AB
         private bool Concat()
         {
@@ -237,6 +269,21 @@ namespace RegularExpression
             return null;
         }
 
+        private void Push(Char input)
+        {
+            var state0 = new State(++_nextStateId);
+            var state1 = new State(++_nextStateId);
+            state0.AddTransition(input, state1);
+
+            FiniteStateAutomaton fsa = new FiniteStateAutomaton();
+            fsa.PushBack(state0);
+            fsa.PushBack(state1);
+
+            _operandStack.Push(fsa);
+
+            _inputSet.Add(input);
+        }
+
         private string ConcatExpand(string input)
         {
             if (input == null)
@@ -252,9 +299,8 @@ namespace RegularExpression
             }
             return sb.ToString();
         }
-
-
-        public HashSet<State> EpsilonClosure(HashSet<State> T)
+        
+        private HashSet<State> EpsilonClosure(HashSet<State> T)
         {
             var result = new HashSet<State>(T);
             var unprocessedStack = new Stack<State>(T);
@@ -263,12 +309,15 @@ namespace RegularExpression
             {
                 var state = unprocessedStack.Pop();
                 var epsilonStates = state.GetStates(EPSILON);
-                foreach (var item in epsilonStates)
+                if (epsilonStates != null)
                 {
-                    if (!result.Contains(item))
+                    foreach (var item in epsilonStates)
                     {
-                        result.Add(item);
-                        unprocessedStack.Push(item);
+                        if (!result.Contains(item))
+                        {
+                            result.Add(item);
+                            unprocessedStack.Push(item);
+                        }
                     }
                 }
             }
@@ -276,7 +325,7 @@ namespace RegularExpression
             return result;
         }
 
-        public HashSet<State> Move(char input, HashSet<State> T)
+        private HashSet<State> Move(char input, HashSet<State> T)
         {
             var result = new HashSet<State>();
             foreach (var item in T)
@@ -286,18 +335,36 @@ namespace RegularExpression
                 {
                     foreach (var state in states)
                     {
-                        result.Add(item);
+                        result.Add(state);
                     }
                 }
             }
             return result;
         }
-        private FiniteStateAutomaton DFATable = new FiniteStateAutomaton();
+       
+        private bool SameStatesSet(HashSet<State> left, HashSet<State> right)
+        {
+            if (left == null && right == null)
+                return true;
+            if (left == null || right == null)
+                return false;
+            if (left.Count != right.Count)
+                return false;
+            foreach (var item in left)
+            {
+                if (!right.Contains(item))
+                    return false;
+            }
+            return true;
+        }
 
-        public void DFA()
+        private void ConvertNFAToDFA()
         {
             if (_NFA == null)
                 return;
+
+            if (_DFA == null)
+                _DFA = new FiniteStateAutomaton();
             _nextStateId = 0;
             Stack<State> unmarkedStates = new Stack<State>();
             HashSet<State> DFAStartStateSet = new HashSet<State>();
@@ -306,8 +373,8 @@ namespace RegularExpression
             NFAStartStateSet.Add(_NFA.GetFirstState());
             DFAStartStateSet = EpsilonClosure(NFAStartStateSet);
 
-            var DFAStartState = new State(DFAStartStateSet, ++_nextStateId);
-            DFATable.PushBack(DFAStartState);
+            var DFAStartState = new State(++_nextStateId, DFAStartStateSet);
+            _DFA.PushBack(DFAStartState);
             unmarkedStates.Push(DFAStartState);
             while (unmarkedStates.Count > 0)
             {
@@ -315,13 +382,13 @@ namespace RegularExpression
                 State dest = null;
                 foreach (var item in _inputSet)
                 {
-                    var moveStates = Move(item, processingDFAState.NFAStates);
+                    var moveStates = Move(item, processingDFAState.NFAStatesSet);
                     var epsilonClosureStats = EpsilonClosure(moveStates);
 
                     bool found = false;
-                    foreach (var s in DFATable.GetStates())
+                    foreach (var s in _DFA.GetStates())
                     {
-                        if (s.NFAStates == epsilonClosureStats)
+                        if (SameStatesSet(s.NFAStatesSet, epsilonClosureStats))
                         {
                             found = true;
                             dest = s;
@@ -331,9 +398,9 @@ namespace RegularExpression
 
                     if (!found)
                     {
-                        var newState = new State(epsilonClosureStats, ++_nextStateId);
+                        var newState = new State(++_nextStateId, epsilonClosureStats);
                         unmarkedStates.Push(newState);
-                        DFATable.PushBack(newState);
+                        _DFA.PushBack(newState);
                         processingDFAState.AddTransition(item, newState);
                     }
                     else
@@ -343,47 +410,25 @@ namespace RegularExpression
                 }
             }
         }
-        private List<string> _patterns = new List<string>();
-        private List<int> _positions = new List<int>();
-        private string _strText;
-        private List<PatternState> _patternList = new List<PatternState>();
-        private int _patternIndex = 0;
-
-        public int FindFirst(string strText,ref string pattern)
+        
+        internal Match Run(int startIndex)
         {
-            _patternList.Clear();
-            _strText = strText;
 
-            if (Find())
+            if (startIndex < _matchedPatternPositions.Count)
             {
-                _patternIndex = 0;
-                pattern = _patterns[0];
-                return _positions[0];
+                return new Match(this, _matchedPatternPositions[startIndex], _matchedPatterns[startIndex], true, ++startIndex);
             }
-            pattern = null;
-            return -1;
-        }
-
-
-        public int FindNext(ref string pattern)
-        {
-            ++_patternIndex;
-            if (_patternIndex < _positions.Count)
-            {
-                pattern = _patterns[_patternIndex];
-                return _positions[_patternIndex];
-            }
-            pattern = null;
-            return -1;
+            return new Match(null, -1, null, false, -1);
         }
 
         private bool Find()
         {
-            _patterns.Clear();
-            _positions.Clear();
-            for (int j = 0; j < _strText.Length; ++j)
+            _matchedPatterns.Clear();
+            _matchedPatternPositions.Clear();
+
+            for (int j = 0; j < _pattern.Length; ++j)
             {
-                char c = _strText[j];
+                char c = _pattern[j];
                 for (int i = 0; i < _patternList.Count; i++)
                 {
                     var patternState = _patternList[i];
@@ -393,8 +438,8 @@ namespace RegularExpression
                         patternState.State = s[0];
                         if (s[0].AcceptState)
                         {
-                            _positions.Add(patternState.StateIndex);
-                            _patterns.Add(_strText.Substring(patternState.StateIndex, j - patternState.StateIndex + 1));
+                            _matchedPatternPositions.Add(patternState.StateIndex);
+                            _matchedPatterns.Add(_pattern.Substring(patternState.StateIndex, j - patternState.StateIndex + 1));
                         }
                     }
                     else
@@ -404,7 +449,7 @@ namespace RegularExpression
                     }
                 }
 
-                var startState = DFATable.GetFirstState();
+                var startState = _DFA.GetFirstState();
                 var transition = startState.GetStates(c);
                 if (transition != null && transition.Count > 0)
                 {
@@ -415,8 +460,8 @@ namespace RegularExpression
 
                     if (transition[0].AcceptState)
                     {
-                        _positions.Add(j);
-                        _patterns.Add(c.ToString());
+                        _matchedPatternPositions.Add(j);
+                        _matchedPatterns.Add(c.ToString());
                     }
                 }
                 else
@@ -424,12 +469,12 @@ namespace RegularExpression
                     //then entry state is already accepting state, like a*
                     if (startState.AcceptState)
                     {
-                        _positions.Add(j);
-                        _patterns.Add(c.ToString());
+                        _matchedPatternPositions.Add(j);
+                        _matchedPatterns.Add(c.ToString());
                     }
                 }
             }
-            return _positions.Count > 0;
+            return _matchedPatternPositions.Count > 0;
         }
     }
 
@@ -439,19 +484,21 @@ namespace RegularExpression
         Dictionary<char, List<State>> _destinations;
         private bool _acceptState;
         HashSet<State> _nfaStates;
+
         public State(int stateId)
+            : this(stateId, null)
         {
-            _stateId = stateId;
-            _destinations = new Dictionary<char, List<State>>();
-            _acceptState = false;
         }
 
-        public State(HashSet<State> NFAState, int stateId)
+        public State(int stateId, HashSet<State> nfaStatesSet)
         {
-            _nfaStates = NFAState;
             _stateId = stateId;
-
             _acceptState = false;
+            _destinations = new Dictionary<char, List<State>>();
+            _nfaStates = nfaStatesSet;
+            
+
+            
             if (_nfaStates != null)
             {
                 foreach (var item in _nfaStates)
@@ -477,7 +524,7 @@ namespace RegularExpression
             }
         }
 
-        public HashSet<State> NFAStates
+        public HashSet<State> NFAStatesSet
         {
             get
             {
@@ -543,7 +590,7 @@ namespace RegularExpression
         }
     }
 
-    public class PatternState
+    internal class PatternState
     {
         private State _state;
         private int _startIndex;
@@ -594,6 +641,36 @@ namespace RegularExpression
             return false;
         }
 
+        public override int GetHashCode()
+        {
+            return _startIndex.GetHashCode() << 8 ^ _state.GetHashCode();
+        }
     }
 
+
+    public class Match
+    {
+        private RegEx _regex;
+        private int _idnex;
+        internal Match(RegEx regex, int positon,string value,bool success,int index)
+        {
+            this.Position = positon;
+            this.Value = value;
+            this.Success = success;
+
+            this._regex = regex;
+            this._idnex = index;
+        }
+        public int Position { get; set; }
+        public string Value { get; set; }
+        public bool Success { get; set; }
+
+        public Match NextMatch()
+        {
+            if (_regex == null)
+                return null;
+            return _regex.Run(_idnex);
+        }
+
+    }
 }
