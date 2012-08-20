@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace RegularExpression
 {
@@ -55,7 +56,6 @@ namespace RegularExpression
         private List<int> _matchedPatternPositions = new List<int>();
         private string _pattern;
         private List<PatternState> _patternList = new List<PatternState>();
-        private int _patternIndex = 0;
 
         private FiniteStateAutomaton _NFA;
         private FiniteStateAutomaton _DFA;
@@ -160,7 +160,31 @@ namespace RegularExpression
                 {
                     using (var sw = new StreamWriter(stream))
                     {
-                        HashSet<State> states = new HashSet<State>();
+                        HashSet<int> processedStates = new HashSet<int>();
+                        Deque<State> unprocessedStates = new Deque<State>();
+                        unprocessedStates.PushBack(A.GetFirstState());
+
+                        while(unprocessedStates.Count>0)
+                        {
+                            var state = unprocessedStates.PopFront();
+                            var labels = state.GetLabels();
+                            foreach (var label in labels)
+                            {
+                                var destinationStates = state.GetStates(label);
+                                if (destinationStates != null)
+                                {
+                                    foreach (var dest in destinationStates)
+                                    {
+                                        sw.WriteLine("Start:" + state.ToString() + "," + "End:" + dest.ToString() + "," + "Label:" + (label!=EPSILON? label.ToString():"EPSILON"));
+                                        if (!processedStates.Contains(dest.StateId))
+                                        {
+                                            unprocessedStates.PushBack(dest);
+                                        }
+                                    }
+                                }
+                            }
+                            processedStates.Add(state.StateId);
+                        }
                     }
                 }
             }
@@ -169,6 +193,59 @@ namespace RegularExpression
             _NFA = A;
         }
 
+        private void ConvertNFAToDFA()
+        {
+            if (_NFA == null)
+                return;
+
+            if (_DFA == null)
+                _DFA = new FiniteStateAutomaton();
+            _nextStateId = 0;
+            Stack<State> unmarkedStates = new Stack<State>();
+            HashSet<State> DFAStartStateSet = new HashSet<State>();
+            HashSet<State> NFAStartStateSet = new HashSet<State>();
+
+            NFAStartStateSet.Add(_NFA.GetFirstState());
+            DFAStartStateSet = EpsilonClosure(NFAStartStateSet);
+
+            var DFAStartState = new State(++_nextStateId, DFAStartStateSet);
+            _DFA.PushBack(DFAStartState);
+            unmarkedStates.Push(DFAStartState);
+            while (unmarkedStates.Count > 0)
+            {
+                var processingDFAState = unmarkedStates.Pop();
+                State dest = null;
+                foreach (var item in _inputSet)
+                {
+                    var moveStates = Move(item, processingDFAState.NFAStatesSet);
+                    var epsilonClosureStats = EpsilonClosure(moveStates);
+
+                    bool found = false;
+                    foreach (var s in _DFA.GetStates())
+                    {
+                        if (SameStatesSet(s.NFAStatesSet, epsilonClosureStats))
+                        {
+                            found = true;
+                            dest = s;
+                            break;
+                        }
+                    }
+
+                    if (!found)
+                    {
+                        var newState = new State(++_nextStateId, epsilonClosureStats);
+                        unmarkedStates.Push(newState);
+                        _DFA.PushBack(newState);
+                        processingDFAState.AddTransition(item, newState);
+                    }
+                    else
+                    {
+                        processingDFAState.AddTransition(item, dest);
+                    }
+                }
+            }
+        }
+        
         //Kleens Closure ->Highest
         //Concatenation ->Middle
         //Union        -> lowest
@@ -358,59 +435,7 @@ namespace RegularExpression
             return true;
         }
 
-        private void ConvertNFAToDFA()
-        {
-            if (_NFA == null)
-                return;
-
-            if (_DFA == null)
-                _DFA = new FiniteStateAutomaton();
-            _nextStateId = 0;
-            Stack<State> unmarkedStates = new Stack<State>();
-            HashSet<State> DFAStartStateSet = new HashSet<State>();
-            HashSet<State> NFAStartStateSet = new HashSet<State>();
-
-            NFAStartStateSet.Add(_NFA.GetFirstState());
-            DFAStartStateSet = EpsilonClosure(NFAStartStateSet);
-
-            var DFAStartState = new State(++_nextStateId, DFAStartStateSet);
-            _DFA.PushBack(DFAStartState);
-            unmarkedStates.Push(DFAStartState);
-            while (unmarkedStates.Count > 0)
-            {
-                var processingDFAState = unmarkedStates.Pop();
-                State dest = null;
-                foreach (var item in _inputSet)
-                {
-                    var moveStates = Move(item, processingDFAState.NFAStatesSet);
-                    var epsilonClosureStats = EpsilonClosure(moveStates);
-
-                    bool found = false;
-                    foreach (var s in _DFA.GetStates())
-                    {
-                        if (SameStatesSet(s.NFAStatesSet, epsilonClosureStats))
-                        {
-                            found = true;
-                            dest = s;
-                            break;
-                        }
-                    }
-
-                    if (!found)
-                    {
-                        var newState = new State(++_nextStateId, epsilonClosureStats);
-                        unmarkedStates.Push(newState);
-                        _DFA.PushBack(newState);
-                        processingDFAState.AddTransition(item, newState);
-                    }
-                    else
-                    {
-                        processingDFAState.AddTransition(item, dest);
-                    }
-                }
-            }
-        }
-        
+       
         internal Match Run(int startIndex)
         {
 
@@ -586,7 +611,7 @@ namespace RegularExpression
         }
         public override string ToString()
         {
-            return "State: " + StateId;
+            return "State " + StateId;
         }
     }
 

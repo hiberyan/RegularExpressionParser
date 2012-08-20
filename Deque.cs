@@ -14,7 +14,7 @@ namespace RegularExpression
 
         private int _head;
         private int _tail;
-        private int _size;
+        private int _count;
      
         public Deque():this(_defaultCapacity)
         {
@@ -26,21 +26,21 @@ namespace RegularExpression
 
             _head = 0;
             _tail = 0;
-            _size = 0;
+            _count = 0;
 
         }
 
-        public int Size
+        public int Count
         {
             get
             {
-                return _size;
+                return _count;
             }
         }
 
         public  void PushFront(T item)
         {
-            if (this._size == this._array.Length)
+            if (this._count == this._array.Length)
             {
                 var capacity = this._array.Length * 2;
                 SetCapacity(capacity);
@@ -55,54 +55,54 @@ namespace RegularExpression
                 _head = _array.Length - 1;
                 _array[_array.Length - 1] = item;
             }
-            _size += 1;
+            _count += 1;
 
         }
 
         public void PushBack(T item)
         {
-            if (this._size == this._array.Length)
+            if (this._count == this._array.Length)
             {
                 var capacity = this._array.Length * 2;
                 SetCapacity(capacity);
             }
             _array[_tail] = item;
              _tail = (_tail + 1) % _array.Length;
-            _size += 1;
+            _count += 1;
         }
 
         public T PopFront()
         {
-            if (_size == 0)
+            if (_count == 0)
                 throw new InvalidOperationException();
             var item = _array[_head];
             _head = (_head + 1) % _array.Length;
-            _size -= 1;
+            _count -= 1;
             return item;
         }
 
         public T PopBack()
         {
-            if (_size == 0)
+            if (_count == 0)
                 throw new InvalidOperationException();
             _tail = _tail - 1;
             if (_tail < 0)
                 _tail = _array.Length - 1;
-            _size -= 1;
+            _count -= 1;
             return _array[_tail];
           
         }
 
         public T PeekFront()
         {
-            if (_size == 0)
+            if (_count == 0)
                 throw new InvalidOperationException();
             return _array[_head];
         }
 
         public T PeekBack()
         {
-            if (_size == 0)
+            if (_count == 0)
                 throw new InvalidOperationException();
             if (_tail > 0)
                 return _array[_tail - 1];
